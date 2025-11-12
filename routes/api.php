@@ -49,6 +49,7 @@ Route::apiResources([
     'log-aktivitas' => LogAktivitasPelangganController::class,
     'konfigurasi' => KonfigurasiController::class,
     'favorit-pelanggan' => FavoritPelangganController::class,
+    'dokumen-pinjaman'=> DokumenPinjamanController::class,
 ]);
 
 // Custom routes
@@ -58,3 +59,16 @@ Route::get('pembayaran/sewa/{id}', [PembayaranController::class, 'getBySewa']);
 Route::get('notifikasi/admin/{id}', [NotifikasiController::class, 'getByAdmin']);
 Route::get('favorit/pelanggan/{id}', [FavoritPelangganController::class, 'getByPelanggan']);
 Route::post('penyewaan/{id}/rating', [PenyewaanController::class, 'addRating']);
+Route::post('/admin/login', [AdminController::class, 'login']);
+
+// ==================== ROUTES PERSETUJUAN PINJAMAN ====================
+Route::get('/penyewaan/persetujuan/pending', [PenyewaanController::class, 'getPersetujuanPinjaman']);
+Route::get('/penyewaan/persetujuan/history', [PenyewaanController::class, 'getHistoryPersetujuan']);
+Route::post('/penyewaan/{id}/persetujuan', [PenyewaanController::class, 'approvePinjaman']);
+
+// Custom routes dokumen
+Route::get('/dokumen-pinjaman/download/{id}', [DokumenPinjamanController::class, 'download']);
+Route::get('/dokumen-pinjaman/preview/{id}', [DokumenPinjamanController::class, 'preview']);
+Route::get('/dokumen-pinjaman/sewa/{id}', [DokumenPinjamanController::class, 'getBySewa']);
+Route::get('/dokumen-pinjaman/tipe/{tipe}', [DokumenPinjamanController::class, 'getByTipe']);
+Route::post('/dokumen-pinjaman/upload-multiple', [DokumenPinjamanController::class, 'uploadMultiple']);

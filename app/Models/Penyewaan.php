@@ -20,6 +20,10 @@ class Penyewaan extends Model
         'status_sewa',
         'rating',
         'ulasan',
+        'status_persetujuan', // TAMBAHKAN INI
+        'disetujui_oleh',     // TAMBAHKAN INI
+        'tanggal_persetujuan', // TAMBAHKAN INI
+        'alasan_penolakan',   // TAMBAHKAN INI
         'created_at',
         'updated_at'
     ];
@@ -50,5 +54,17 @@ class Penyewaan extends Model
     public function kontrak()
     {
         return $this->hasMany(KontrakDigital::class, 'id_sewa');
+    }
+
+    // ✅ TAMBAHKAN RELATIONSHIP DOKUMEN
+    public function dokumen()
+    {
+        return $this->hasMany(DokumenPinjaman::class, 'id_sewa');
+    }
+
+    // ✅ Relationship ke admin yang approve
+    public function admin()
+    {
+        return $this->belongsTo(Admin::class, 'disetujui_oleh', 'id_admin');
     }
 }

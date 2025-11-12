@@ -17,15 +17,38 @@ class AdminController extends BaseController
         'level' => 'nullable|string|max:20'
     ];
 
-    public function index(): JsonResponse
+    public function login(Request $request): JsonResponse
     {
         try {
-            $data = Admin::orderBy('id_admin', 'DESC')->get();
-            return $this->successResponse($data, 'Data admin berhasil diambil');
+            $request->validate([
+                'username' => 'required|string',
+                'password' => 'required|string',
+            ]);
+        
+            // Cari admin berdasarkan username
+            $admin = Admin::where('username', $request->username)->first();
+        
+            if (!$admin || !Hash::check($request->password, $admin->password)) {
+                return $this->errorResponse('Username atau password salah', 401);
+            }
+        
+            // Buat token login Sanctum
+            $token = $admin->createToken('admin_token')->plainTextToken;
+        
+            return $this->successResponse([
+                'token' => $token,
+                'admin' => [
+                    'id_admin' => $admin->id_admin,
+                    'username' => $admin->username,
+                    'nama_admin' => $admin->nama_admin,
+                    'level' => $admin->level,
+                ]
+            ], 'Login berhasil');
         } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil data admin', 500, $e->getMessage());
+            return $this->errorResponse('Gagal login admin', 500, $e->getMessage());
         }
     }
+
 
     public function store(Request $request): JsonResponse
     {
