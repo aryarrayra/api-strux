@@ -53,13 +53,13 @@ Route::apiResources([
 ]);
 
 // Custom routes
-Route::get('alat-berat/status/{status}', [AlatBeratController::class, 'getByStatus']);
+
 Route::get('penyewaan/pelanggan/{id}', [PenyewaanController::class, 'getByPelanggan']);
 Route::get('pembayaran/sewa/{id}', [PembayaranController::class, 'getBySewa']);
 Route::get('notifikasi/admin/{id}', [NotifikasiController::class, 'getByAdmin']);
 Route::get('favorit/pelanggan/{id}', [FavoritPelangganController::class, 'getByPelanggan']);
 Route::post('penyewaan/{id}/rating', [PenyewaanController::class, 'addRating']);
-Route::post('/admin/login', [AdminController::class, 'login']);
+
 
 // ==================== ROUTES PERSETUJUAN PINJAMAN ====================
 Route::get('/penyewaan/persetujuan/pending', [PenyewaanController::class, 'getPersetujuanPinjaman']);
@@ -72,3 +72,20 @@ Route::get('/dokumen-pinjaman/preview/{id}', [DokumenPinjamanController::class, 
 Route::get('/dokumen-pinjaman/sewa/{id}', [DokumenPinjamanController::class, 'getBySewa']);
 Route::get('/dokumen-pinjaman/tipe/{tipe}', [DokumenPinjamanController::class, 'getByTipe']);
 Route::post('/dokumen-pinjaman/upload-multiple', [DokumenPinjamanController::class, 'uploadMultiple']);
+
+//auth
+Route::post('/admin/login', [AdminController::class, 'login']);
+Route::post('/register', [PelangganController::class, 'register']);
+
+//alat-berat
+Route::prefix('alat-berat')->group(function () {
+    Route::get('/', [AlatBeratController::class, 'index']); // GET all
+    Route::post('/', [AlatBeratController::class, 'store']); // POST create
+    Route::get('/search', [AlatBeratController::class, 'search']); // GET search
+    Route::get('/status/{status}', [AlatBeratController::class, 'getByStatus']); // GET by status
+    Route::get('/{id}', [AlatBeratController::class, 'show']); // GET single
+    Route::put('/{id}', [AlatBeratController::class, 'update']); // PUT update
+    Route::delete('/{id}', [AlatBeratController::class, 'destroy']); // DELETE
+    // Tambahkan route untuk upload foto
+    Route::post('/upload-foto', [AlatBeratController::class, 'uploadFoto']);
+});

@@ -14,8 +14,24 @@ class Petugas extends Model
     protected $fillable = [
         'nama_petugas',
         'no_telp',
+        'alamat',
+        'tempat_lahir',
+        'tanggal_lahir', // TAMBAHKAN INI
         'role',
+        'email',
         'status'
+    ];
+
+    // TAMBAHKAN CASTS UNTUK MEMASTIKAN TIPE DATA
+    protected $casts = [
+        'nama_petugas' => 'string',
+        'no_telp' => 'string', 
+        'alamat' => 'string',
+        'tempat_lahir' => 'string',
+        'tanggal_lahir' => 'date',
+        'role' => 'string',
+        'email' => 'string',
+        'status' => 'string'
     ];
 
     public $timestamps = false;
