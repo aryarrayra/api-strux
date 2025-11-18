@@ -16,6 +16,7 @@ use App\Http\Controllers\SessionPelangganController;
 use App\Http\Controllers\LogAktivitasPelangganController;
 use App\Http\Controllers\KonfigurasiController;
 use App\Http\Controllers\FavoritPelangganController;
+use App\Http\Controllers\AdminDashboardController;
 
 /*
 |--------------------------------------------------------------------------
@@ -75,7 +76,13 @@ Route::post('/dokumen-pinjaman/upload-multiple', [DokumenPinjamanController::cla
 
 //auth
 Route::post('/admin/login', [AdminController::class, 'login']);
-Route::post('/register', [PelangganController::class, 'register']);
+Route::post('/user/login', [PelangganController::class, 'login']);
+Route::post('/user/register', [PelangganController::class, 'register']);
+Route::post('/user/logout', [PelangganController::class, 'logout']);
+Route::post('/user/profile', [PelangganController::class, 'profile']);
+Route::post('/user/profile/update', [PelangganController::class, 'updateProfile']);
+Route::post('/upload-ktp', [PelangganController::class, 'uploadKtp']);
+Route::post('/upload-profile-photo', [PelangganController::class, 'uploadProfilePhoto']);
 
 //alat-berat
 Route::prefix('alat-berat')->group(function () {
@@ -88,4 +95,16 @@ Route::prefix('alat-berat')->group(function () {
     Route::delete('/{id}', [AlatBeratController::class, 'destroy']); // DELETE
     // Tambahkan route untuk upload foto
     Route::post('/upload-foto', [AlatBeratController::class, 'uploadFoto']);
+});
+
+// Admin Dashboard Routes
+Route::prefix('admin/dashboard')->group(function () {
+    Route::get('stats', [AdminDashboardController::class, 'getDashboardStats']);
+    Route::get('activities', [AdminDashboardController::class, 'getRecentActivities']);
+    Route::get('maintenance', [AdminDashboardController::class, 'getMaintenanceSchedule']);
+    Route::get('revenue-chart', [AdminDashboardController::class, 'getRevenueChart']);
+    Route::get('alat-utilization', [AdminDashboardController::class, 'getAlatUtilization']);
+    Route::get('quick-stats', [AdminDashboardController::class, 'getQuickStats']);
+    Route::get('pending-approvals', [AdminDashboardController::class, 'getPendingApprovals']);
+    Route::get('all', [AdminDashboardController::class, 'getAllDashboardData']);
 });

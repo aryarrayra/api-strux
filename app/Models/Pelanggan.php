@@ -19,6 +19,7 @@ class Pelanggan extends Model
         'email',
         'foto_ktp',
         'foto_profil',
+        "company_name",
         'created_at',
         'updated_at'
     ];
