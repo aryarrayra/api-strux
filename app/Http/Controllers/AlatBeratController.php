@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class AlatBeratController extends BaseController
 {
@@ -21,7 +22,7 @@ class AlatBeratController extends BaseController
     ];
 
     /**
-     * Get all alat berat - PERBAIKI UNTUK RETURN FULL URL
+     * Get all alat berat dengan full URL foto
      */
     public function index(): JsonResponse
     {
@@ -30,23 +31,7 @@ class AlatBeratController extends BaseController
             
             // Transform data untuk include full URL foto
             $data->transform(function ($item) {
-                if ($item->foto) {
-                    // Jika foto sudah URL, biarkan
-                    if (filter_var($item->foto, FILTER_VALIDATE_URL)) {
-                        // Sudah URL, tidak perlu diubah
-                    } 
-                    // Jika foto adalah path storage, convert ke URL
-                    else if (Storage::disk('public')->exists($item->foto)) {
-                        $item->foto = asset('storage/' . $item->foto);
-                    }
-                    // Jika foto adalah path tapi file tidak ada, gunakan default
-                    else {
-                        $item->foto = asset('images/default-alat-berat.jpg');
-                    }
-                } else {
-                    // Jika tidak ada foto, gunakan default
-                    $item->foto = asset('images/default-alat-berat.jpg');
-                }
+                $item->foto = $this->getFotoUrl($item->foto);
                 return $item;
             });
 
@@ -57,7 +42,7 @@ class AlatBeratController extends BaseController
     }
 
     /**
-     * Create new alat berat - PERBAIKI
+     * Create new alat berat dengan foto base64
      */
     public function store(Request $request): JsonResponse
     {
@@ -72,35 +57,15 @@ class AlatBeratController extends BaseController
                 'foto' => 'nullable|string'
             ]);
 
-            // Handle base64 image
-            if (isset($validated['foto']) && str_starts_with($validated['foto'], 'data:image')) {
-                $base64Image = $validated['foto'];
-                
-                // Extract base64 data
-                @list($type, $data) = explode(';', $base64Image);
-                @list(, $data) = explode(',', $data);
-                
-                // Decode base64
-                $imageData = base64_decode($data);
-                
-                // Generate unique filename
-                $filename = 'alat-berat-' . time() . '.jpg';
-                $path = 'alat-berat/' . $filename;
-                
-                // Save to storage
-                Storage::disk('public')->put($path, $imageData);
-                
-                $validated['foto'] = $path;
+            // Handle base64 image dan simpan ke public/storage/alat-berat/
+            if (isset($validated['foto']) && !empty($validated['foto'])) {
+                $validated['foto'] = $this->saveBase64Image($validated['foto']);
             }
 
             $alat = AlatBerat::create($validated);
             
-            // Return full URL untuk foto
-            if ($alat->foto) {
-                $alat->foto = asset('storage/' . $alat->foto);
-            } else {
-                $alat->foto = asset('images/default-alat-berat.jpg');
-            }
+            // Return dengan full URL foto
+            $alat->foto = $this->getFotoUrl($alat->foto);
             
             return $this->successResponse($alat, 'Data alat berat berhasil ditambahkan', 201);
             
@@ -112,7 +77,7 @@ class AlatBeratController extends BaseController
     }
 
     /**
-     * Get single alat berat - PERBAIKI
+     * Get single alat berat
      */
     public function show($id): JsonResponse
     {
@@ -124,17 +89,7 @@ class AlatBeratController extends BaseController
             }
 
             // Return full URL untuk foto
-            if ($alat->foto) {
-                if (filter_var($alat->foto, FILTER_VALIDATE_URL)) {
-                    // Sudah URL, tidak perlu diubah
-                } else if (Storage::disk('public')->exists($alat->foto)) {
-                    $alat->foto = asset('storage/' . $alat->foto);
-                } else {
-                    $alat->foto = asset('images/default-alat-berat.jpg');
-                }
-            } else {
-                $alat->foto = asset('images/default-alat-berat.jpg');
-            }
+            $alat->foto = $this->getFotoUrl($alat->foto);
 
             return $this->successResponse($alat, 'Data alat berat berhasil diambil');
             
@@ -144,7 +99,7 @@ class AlatBeratController extends BaseController
     }
 
     /**
-     * Update alat berat - PERBAIKI
+     * Update alat berat
      */
     public function update(Request $request, $id): JsonResponse
     {
@@ -165,40 +120,19 @@ class AlatBeratController extends BaseController
                 'foto' => 'nullable|string'
             ]);
 
-            // Handle base64 image
-            if (isset($validated['foto']) && str_starts_with($validated['foto'], 'data:image')) {
-                $base64Image = $validated['foto'];
+            // Handle base64 image untuk update
+            if (isset($validated['foto']) && !empty($validated['foto'])) {
+                // Hapus foto lama jika ada
+                $this->deleteFoto($alat->foto);
                 
-                // Delete old photo if exists
-                if ($alat->foto && Storage::disk('public')->exists($alat->foto)) {
-                    Storage::disk('public')->delete($alat->foto);
-                }
-                
-                // Extract base64 data
-                @list($type, $data) = explode(';', $base64Image);
-                @list(, $data) = explode(',', $data);
-                
-                // Decode base64
-                $imageData = base64_decode($data);
-                
-                // Generate unique filename
-                $filename = 'alat-berat-' . time() . '.jpg';
-                $path = 'alat-berat/' . $filename;
-                
-                // Save to storage
-                Storage::disk('public')->put($path, $imageData);
-                
-                $validated['foto'] = $path;
+                // Simpan foto baru
+                $validated['foto'] = $this->saveBase64Image($validated['foto']);
             }
 
             $alat->update($validated);
 
             // Return full URL untuk foto
-            if ($alat->foto) {
-                $alat->foto = asset('storage/' . $alat->foto);
-            } else {
-                $alat->foto = asset('images/default-alat-berat.jpg');
-            }
+            $alat->foto = $this->getFotoUrl($alat->foto);
 
             return $this->successResponse($alat, 'Data alat berat berhasil diupdate');
             
@@ -221,10 +155,8 @@ class AlatBeratController extends BaseController
                 return $this->errorResponse('Data alat berat tidak ditemukan', 404);
             }
 
-            // Delete photo if exists dan bukan URL external
-            if ($alat->foto && !filter_var($alat->foto, FILTER_VALIDATE_URL) && Storage::disk('public')->exists($alat->foto)) {
-                Storage::disk('public')->delete($alat->foto);
-            }
+            // Hapus foto jika ada
+            $this->deleteFoto($alat->foto);
 
             $alat->delete();
             return $this->successResponse(null, 'Data alat berat berhasil dihapus');
@@ -235,7 +167,7 @@ class AlatBeratController extends BaseController
     }
 
     /**
-     * Get alat berat by status - PERBAIKI
+     * Get alat berat by status
      */
     public function getByStatus($status): JsonResponse
     {
@@ -252,17 +184,7 @@ class AlatBeratController extends BaseController
             
             // Transform data untuk include full URL foto
             $data->transform(function ($item) {
-                if ($item->foto) {
-                    if (filter_var($item->foto, FILTER_VALIDATE_URL)) {
-                        // Sudah URL, tidak perlu diubah
-                    } else if (Storage::disk('public')->exists($item->foto)) {
-                        $item->foto = asset('storage/' . $item->foto);
-                    } else {
-                        $item->foto = asset('images/default-alat-berat.jpg');
-                    }
-                } else {
-                    $item->foto = asset('images/default-alat-berat.jpg');
-                }
+                $item->foto = $this->getFotoUrl($item->foto);
                 return $item;
             });
                 
@@ -274,7 +196,7 @@ class AlatBeratController extends BaseController
     }
 
     /**
-     * Search alat berat by name - PERBAIKI
+     * Search alat berat by name
      */
     public function search(Request $request): JsonResponse
     {
@@ -292,17 +214,7 @@ class AlatBeratController extends BaseController
             
             // Transform data untuk include full URL foto
             $data->transform(function ($item) {
-                if ($item->foto) {
-                    if (filter_var($item->foto, FILTER_VALIDATE_URL)) {
-                        // Sudah URL, tidak perlu diubah
-                    } else if (Storage::disk('public')->exists($item->foto)) {
-                        $item->foto = asset('storage/' . $item->foto);
-                    } else {
-                        $item->foto = asset('images/default-alat-berat.jpg');
-                    }
-                } else {
-                    $item->foto = asset('images/default-alat-berat.jpg');
-                }
+                $item->foto = $this->getFotoUrl($item->foto);
                 return $item;
             });
                 
@@ -314,7 +226,7 @@ class AlatBeratController extends BaseController
     }
 
     /**
-     * Upload foto - PERBAIKI
+     * Upload foto via multipart/form-data
      */
     public function uploadFoto(Request $request): JsonResponse
     {
@@ -324,15 +236,33 @@ class AlatBeratController extends BaseController
             ]);
 
             if ($request->hasFile('foto')) {
-                $fotoPath = $request->file('foto')->store('alat-berat', 'public');
-                $fullUrl = asset('storage/' . $fotoPath);
+                $file = $request->file('foto');
+                
+                // Generate unique filename
+                $filename = 'alat-berat-' . time() . '-' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+                
+                // Simpan ke public/storage/alat-berat/
+                $destinationPath = public_path('storage/alat-berat');
+                
+                // Buat folder jika belum ada
+                if (!file_exists($destinationPath)) {
+                    mkdir($destinationPath, 0755, true);
+                }
+                
+                $file->move($destinationPath, $filename);
+                
+                // Path relatif untuk disimpan di database
+                $fotoPath = 'storage/alat-berat/' . $filename;
+                
+                // Full URL untuk response
+                $fullUrl = asset($fotoPath);
                 
                 return response()->json([
                     'success' => true,
                     'message' => 'Foto berhasil diupload',
                     'data' => [
-                        'foto_path' => $fotoPath, // Path untuk disimpan di database
-                        'foto_url' => $fullUrl,   // Full URL untuk ditampilkan
+                        'foto_path' => $fotoPath,
+                        'foto_url' => $fullUrl,
                     ]
                 ]);
             }
@@ -354,6 +284,180 @@ class AlatBeratController extends BaseController
                 'message' => 'Gagal mengupload foto: ' . $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    // ========== HELPER METHODS ==========
+
+    /**
+     * ✅ SIMPLE FIX: Simpan base64 image langsung ke public/image/alat-berat/
+     * Tanpa pake storage symlink, langsung ke folder public!
+     */
+    private function saveBase64Image(string $base64String): string
+    {
+        try {
+            \Log::info('🔍 saveBase64Image - Input:', [
+                'length' => strlen($base64String),
+                'starts_with_data_uri' => str_starts_with($base64String, 'data:image')
+            ]);
+
+            // Check if it's a base64 string with data URI scheme
+            if (str_starts_with($base64String, 'data:image')) {
+                // Extract base64 data from data URI
+                @list($type, $data) = explode(';', $base64String);
+                @list(, $data) = explode(',', $data);
+                $imageData = base64_decode($data);
+                
+                // Get image type from data URI
+                preg_match('/data:image\/([a-zA-Z0-9]+);/', $base64String, $matches);
+                $extension = $matches[1] ?? 'jpg';
+            } else {
+                // Pure base64 string (no data URI prefix)
+                $imageData = base64_decode($base64String);
+                $extension = 'jpg';
+            }
+            
+            // Validasi image data
+            if (!$imageData || strlen($imageData) < 100) {
+                throw new \Exception('Invalid or empty image data');
+            }
+
+            // Generate unique filename
+            $filename = 'alat-berat-' . time() . '-' . Str::random(10) . '.' . $extension;
+            
+            // ✅ SIMPAN LANGSUNG KE: public/image/alat-berat/
+            $destinationPath = public_path('image/alat-berat');
+            
+            // Buat folder jika belum ada
+            if (!file_exists($destinationPath)) {
+                @mkdir($destinationPath, 0777, true);
+            }
+            
+            // Set permission folder agar bisa ditulis
+            @chmod($destinationPath, 0777);
+            
+            // Simpan file
+            $fullFilePath = $destinationPath . '/' . $filename;
+            $bytesWritten = @file_put_contents($fullFilePath, $imageData);
+            
+            if ($bytesWritten === false) {
+                throw new \Exception('Failed to write image file to: ' . $fullFilePath);
+            }
+
+            // Set permissions file
+            @chmod($fullFilePath, 0666);
+
+            // ✅ Return FULL URL langsung
+            // URL: http://localhost:8000/image/alat-berat/xxx.jpg
+            $relativePath = 'image/alat-berat/' . $filename;
+            $fullUrl = asset($relativePath);
+
+            \Log::info('✅ Image saved successfully', [
+                'filename' => $filename,
+                'physical_path' => $fullFilePath,
+                'relative_path' => $relativePath,
+                'url' => $fullUrl,
+                'size_bytes' => $bytesWritten
+            ]);
+
+            return $fullUrl;
+            
+        } catch (\Exception $e) {
+            \Log::error('❌ Error saving base64 image:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw new \Exception('Gagal menyimpan foto: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * ✅ FIXED: Get full URL untuk foto
+     * Mengembalikan FULL URL ke file gambar
+     */
+    private function getFotoUrl(?string $fotoPath): string
+    {
+        // Jika null atau kosong
+        if (empty($fotoPath)) {
+            return asset('images/default-alat-berat.jpg');
+        }
+
+        \Log::info('🔍 getFotoUrl - Processing:', ['path' => $fotoPath]);
+
+        // Jika sudah full URL (http/https), return as is
+        if (filter_var($fotoPath, FILTER_VALIDATE_URL)) {
+            \Log::info('✅ Already full URL:', ['url' => $fotoPath]);
+            return $fotoPath;
+        }
+        
+        // Cek berbagai kemungkinan path
+        $possiblePaths = [
+            $fotoPath,  // Path apa adanya
+            'storage/alat-berat/' . basename($fotoPath),  // storage/alat-berat/xxx.jpg
+            'storage/image/alat-berat/' . basename($fotoPath),  // storage/image/alat-berat/xxx.jpg
+        ];
+
+        foreach ($possiblePaths as $path) {
+            $fullPath = public_path($path);
+            if (file_exists($fullPath)) {
+                $url = asset($path);
+                \Log::info('✅ File found at:', ['path' => $path, 'url' => $url]);
+                return $url;
+            }
+        }
+
+        // Jika file tidak ada di mana pun
+        \Log::warning('⚠️ File not found in any location:', [
+            'originalPath' => $fotoPath,
+            'checkedPaths' => $possiblePaths
+        ]);
+        
+        return asset('images/default-alat-berat.jpg');
+    }
+
+    /**
+     * ✅ FIXED: Hapus foto dari storage
+     */
+    private function deleteFoto(?string $fotoPath): void
+    {
+        if (empty($fotoPath)) {
+            return;
+        }
+
+        \Log::info('🗑️ deleteFoto - Processing:', ['path' => $fotoPath]);
+
+        try {
+            // Jika full URL, extract path dan hapus file
+            if (filter_var($fotoPath, FILTER_VALIDATE_URL)) {
+                // Extract path dari URL
+                // Contoh: http://localhost:8000/storage/alat-berat/xxx.jpg
+                // Ambil bagian: storage/alat-berat/xxx.jpg
+                $parsed = parse_url($fotoPath);
+                $pathOnly = ltrim($parsed['path'], '/');
+                
+                // Cek apakah ini path lokal di storage/alat-berat/
+                if (strpos($pathOnly, 'storage/alat-berat/') !== false) {
+                    $fullPath = public_path($pathOnly);
+                    if (file_exists($fullPath)) {
+                        unlink($fullPath);
+                        \Log::info('✅ File deleted:', ['path' => $fullPath]);
+                    }
+                }
+                return;
+            }
+            
+            // Jika path relatif, hapus file langsung
+            $fullPath = public_path($fotoPath);
+            if (file_exists($fullPath)) {
+                unlink($fullPath);
+                \Log::info('✅ File deleted:', ['path' => $fullPath]);
+            }
+            
+        } catch (\Exception $e) {
+            \Log::error('❌ Error deleting file:', [
+                'path' => $fotoPath,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 }
