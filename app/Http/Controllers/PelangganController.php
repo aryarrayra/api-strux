@@ -143,6 +143,68 @@ class PelangganController extends BaseController
         }
     }
 
+        public function getPelangganByUserId($id_user): JsonResponse
+    {
+        try {
+            \Log::info('🔍 [PELANGGAN] Mencari pelanggan by user_id:', ['id_user' => $id_user]);
+
+            // Cari user terlebih dahulu
+            $user = User::find($id_user);
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User tidak ditemukan',
+                ], 404);
+            }
+
+            \Log::info('👤 [PELANGGAN] User found:', [
+                'id' => $user->id,
+                'email' => $user->email,
+                'name' => $user->name
+            ]);
+
+            // Cari pelanggan berdasarkan email user (karena relasi melalui email)
+            $pelanggan = Pelanggan::where('email', $user->email)->first();
+
+            if (!$pelanggan) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data pelanggan tidak ditemukan untuk user ini',
+                ], 404);
+            }
+
+            \Log::info('✅ [PELANGGAN] Pelanggan found:', [
+                'id_pelanggan' => $pelanggan->id_pelanggan,
+                'nama_pelanggan' => $pelanggan->nama_pelanggan,
+                'email' => $pelanggan->email
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Data pelanggan berhasil ditemukan',
+                'data' => [
+                    'id_pelanggan' => $pelanggan->id_pelanggan,
+                    'nama_pelanggan' => $pelanggan->nama_pelanggan,
+                    'email' => $pelanggan->email,
+                    'no_telp' => $pelanggan->no_telp,
+                    'alamat' => $pelanggan->alamat,
+                    'company_name' => $pelanggan->company_name,
+                    'foto_ktp' => $this->getAssetUrl($pelanggan->foto_ktp),
+                    'foto_profil' => $this->getAssetUrl($pelanggan->foto_profil),
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('❌ [PELANGGAN] Error in getPelangganByUserId: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data pelanggan',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     // User registration method dengan upload foto KTP ke assets
     public function register(Request $request): JsonResponse
     {

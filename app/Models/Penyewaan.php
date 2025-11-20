@@ -18,6 +18,7 @@ class Penyewaan extends Model
         'tanggal_kembali',
         'total_harga',
         'status_sewa',
+        'dokumen_data',
         'rating',
         'ulasan',
         'status_persetujuan', // TAMBAHKAN INI
@@ -25,7 +26,12 @@ class Penyewaan extends Model
         'tanggal_persetujuan', // TAMBAHKAN INI
         'alasan_penolakan',   // TAMBAHKAN INI
         'created_at',
-        'updated_at'
+        'updated_at',
+        'nama_proyek',
+        'lokasi_proyek', 
+        'deskripsi_proyek',
+        'latitude',
+        'longitude'
     ];
 
     public $timestamps = true;

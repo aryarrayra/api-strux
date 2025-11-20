@@ -1,318 +1,262 @@
 <?php
+
 namespace App\Http\Controllers;
 
+use Illuminate\Http\Request;
 use App\Models\DokumenPinjaman;
 use App\Models\Penyewaan;
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
-class DokumenPinjamanController extends BaseController
+class DokumenPinjamanController extends Controller
 {
-    protected $model = DokumenPinjaman::class;
-    
-    protected $validationRules = [
-        'id_sewa' => 'required|exists:penyewaan,id_sewa',
-        'nama_dokumen' => 'required|string|max:255',
-        'tipe_dokumen' => 'required|in:Surat_Pinjaman,KTP,SIUP,NPWP,Sertifikat,Lainnya'
-    ];
-
-    // GET: Semua dokumen
-    public function index(): JsonResponse
+    /**
+     * Upload multiple dokumen untuk penyewaan - SESUAI STRUKTUR DATABASE
+     */
+    public function uploadForPenyewaan(Request $request)
     {
+        Log::info('=== UPLOAD FOR PENYEWAAN - SESUAI STRUKTUR ===');
+        
         try {
-            $data = DokumenPinjaman::with(['penyewaan', 'penyewaan.pelanggan', 'penyewaan.alat', 'admin'])
-                ->orderBy('id_dokumen', 'DESC')
-                ->get();
-                
-            return $this->successResponse($data, 'Data dokumen pinjaman berhasil diambil');
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil data dokumen pinjaman', 500, $e->getMessage());
-        }
-    }
-
-    // POST: Upload dokumen baru
-    public function store(Request $request): JsonResponse
-    {
-        try {
-            $validated = $request->validate([
-                'id_sewa' => 'required|exists:penyewaan,id_sewa',
-                'nama_dokumen' => 'required|string|max:255',
-                'tipe_dokumen' => 'required|in:Surat_Pinjaman,KTP,SIUP,NPWP,Sertifikat,Lainnya',
-                'file_dokumen' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240' // max 10MB
-            ]);
-
-            DB::beginTransaction();
-
-            // Cek apakah penyewaan exists
-            $penyewaan = Penyewaan::find($validated['id_sewa']);
-            if (!$penyewaan) {
-                return $this->errorResponse('Data penyewaan tidak ditemukan', 404);
-            }
-
-            // Upload file
-            if ($request->hasFile('file_dokumen')) {
-                $file = $request->file('file_dokumen');
-                
-                // Generate unique filename
-                $fileName = 'doc_' . time() . '_' . $validated['id_sewa'] . '.' . $file->getClientOriginalExtension();
-                $filePath = $file->storeAs('dokumen_pinjaman', $fileName, 'public');
-
-                // Create dokumen record
-                $dokumen = DokumenPinjaman::create([
-                    'id_sewa' => $validated['id_sewa'],
-                    'nama_dokumen' => $validated['nama_dokumen'],
-                    'file_path' => $filePath,
-                    'tipe_dokumen' => $validated['tipe_dokumen'],
-                    'ukuran_file' => $file->getSize(),
-                    'uploaded_by' => auth()->id() // admin yang upload
-                ]);
-
-                DB::commit();
-
-                // Load relations untuk response
-                $dokumen->load(['penyewaan', 'penyewaan.pelanggan', 'penyewaan.alat']);
-
-                return $this->successResponse($dokumen, 'Dokumen berhasil diupload', 201);
-            }
-
-            DB::rollBack();
-            return $this->errorResponse('File dokumen tidak ditemukan', 400);
-            
-        } catch (ValidationException $e) {
-            DB::rollBack();
-            return $this->errorResponse('Validasi gagal', 422, $e->errors());
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return $this->errorResponse('Gagal upload dokumen: ' . $e->getMessage(), 500);
-        }
-    }
-
-    // GET: Detail dokumen
-    public function show($id): JsonResponse
-    {
-        try {
-            $dokumen = DokumenPinjaman::with([
-                'penyewaan', 
-                'penyewaan.pelanggan', 
-                'penyewaan.alat',
-                'admin'
-            ])->find($id);
-            
-            if (!$dokumen) {
-                return $this->errorResponse('Data dokumen tidak ditemukan', 404);
-            }
-
-            return $this->successResponse($dokumen, 'Data dokumen berhasil diambil');
-            
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil data dokumen', 500, $e->getMessage());
-        }
-    }
-
-    // PUT: Update info dokumen (tanpa file)
-    public function update(Request $request, $id): JsonResponse
-    {
-        try {
-            $dokumen = DokumenPinjaman::find($id);
-            
-            if (!$dokumen) {
-                return $this->errorResponse('Data dokumen tidak ditemukan', 404);
-            }
-
-            $validated = $request->validate([
-                'nama_dokumen' => 'sometimes|string|max:255',
-                'tipe_dokumen' => 'sometimes|in:Surat_Pinjaman,KTP,SIUP,NPWP,Sertifikat,Lainnya'
-            ]);
-
-            $dokumen->update($validated);
-
-            return $this->successResponse($dokumen, 'Data dokumen berhasil diupdate');
-            
-        } catch (ValidationException $e) {
-            return $this->errorResponse('Validasi gagal', 422, $e->errors());
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengupdate data dokumen', 500, $e->getMessage());
-        }
-    }
-
-    // DELETE: Hapus dokumen
-    public function destroy($id): JsonResponse
-    {
-        try {
-            $dokumen = DokumenPinjaman::find($id);
-            
-            if (!$dokumen) {
-                return $this->errorResponse('Data dokumen tidak ditemukan', 404);
-            }
-
-            DB::beginTransaction();
-
-            // Hapus file dari storage
-            if (Storage::disk('public')->exists($dokumen->file_path)) {
-                Storage::disk('public')->delete($dokumen->file_path);
-            }
-
-            $dokumen->delete();
-
-            DB::commit();
-            return $this->successResponse(null, 'Data dokumen berhasil dihapus');
-            
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return $this->errorResponse('Gagal menghapus data dokumen', 500, $e->getMessage());
-        }
-    }
-
-    // ==================== CUSTOM METHODS ====================
-
-    // GET: Download dokumen
-    public function download($id): JsonResponse
-    {
-        try {
-            $dokumen = DokumenPinjaman::find($id);
-            
-            if (!$dokumen) {
-                return $this->errorResponse('Dokumen tidak ditemukan', 404);
-            }
-
-            if (!Storage::disk('public')->exists($dokumen->file_path)) {
-                return $this->errorResponse('File dokumen tidak ditemukan di server', 404);
-            }
-
-            $filePath = Storage::disk('public')->path($dokumen->file_path);
-            $headers = [
-                'Content-Type' => $this->getMimeType($dokumen->file_path),
-                'Content-Disposition' => 'inline; filename="' . $dokumen->nama_dokumen . '"'
-            ];
-
-            return response()->download($filePath, $dokumen->nama_dokumen, $headers);
-            
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal download dokumen: ' . $e->getMessage(), 500);
-        }
-    }
-
-    // GET: Dokumen by penyewaan ID
-    public function getBySewa($id_sewa): JsonResponse
-    {
-        try {
-            $dokumen = DokumenPinjaman::with(['penyewaan', 'penyewaan.pelanggan', 'penyewaan.alat', 'admin'])
-                ->where('id_sewa', $id_sewa)
-                ->orderBy('created_at', 'DESC')
-                ->get();
-                
-            return $this->successResponse($dokumen, 'Data dokumen berhasil diambil');
-            
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil data dokumen', 500, $e->getMessage());
-        }
-    }
-
-    // GET: Dokumen by tipe
-    public function getByTipe($tipe): JsonResponse
-    {
-        try {
-            $dokumen = DokumenPinjaman::with(['penyewaan', 'penyewaan.pelanggan', 'penyewaan.alat'])
-                ->where('tipe_dokumen', $tipe)
-                ->orderBy('id_dokumen', 'DESC')
-                ->get();
-                
-            return $this->successResponse($dokumen, 'Data dokumen berhasil diambil');
-            
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil data dokumen', 500, $e->getMessage());
-        }
-    }
-
-    // POST: Upload multiple dokumen
-    public function uploadMultiple(Request $request): JsonResponse
-    {
-        try {
-            $validated = $request->validate([
-                'id_sewa' => 'required|exists:penyewaan,id_sewa',
+            // Validasi dasar
+            $validator = Validator::make($request->all(), [
+                'id_sewa' => 'required|integer|exists:penyewaan,id_sewa',
                 'dokumen' => 'required|array|min:1',
                 'dokumen.*.nama_dokumen' => 'required|string|max:255',
-                'dokumen.*.tipe_dokumen' => 'required|in:Surat_Pinjaman,KTP,SIUP,NPWP,Sertifikat,Lainnya',
-                'dokumen.*.file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240'
+                'dokumen.*.tipe_dokumen' => 'required|string|max:100',
+                'dokumen.*.file_base64' => 'required|string',
+                'dokumen.*.file_name' => 'required|string|max:255'
             ]);
 
-            DB::beginTransaction();
-
-            $uploadedDokumen = [];
-
-            foreach ($request->file('dokumen') as $index => $file) {
-                $data = $validated['dokumen'][$index];
-                
-                // Generate unique filename
-                $fileName = 'doc_' . time() . '_' . $index . '_' . $validated['id_sewa'] . '.' . $file->getClientOriginalExtension();
-                $filePath = $file->storeAs('dokumen_pinjaman', $fileName, 'public');
-
-                $dokumen = DokumenPinjaman::create([
-                    'id_sewa' => $validated['id_sewa'],
-                    'nama_dokumen' => $data['nama_dokumen'],
-                    'file_path' => $filePath,
-                    'tipe_dokumen' => $data['tipe_dokumen'],
-                    'ukuran_file' => $file->getSize(),
-                    'uploaded_by' => auth()->id()
-                ]);
-
-                $uploadedDokumen[] = $dokumen;
+            if ($validator->fails()) {
+                Log::error('❌ Validasi gagal:', $validator->errors()->toArray());
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validasi gagal',
+                    'errors' => $validator->errors()
+                ], 422);
             }
 
-            DB::commit();
+            $idSewa = $request->id_sewa;
+            $uploadedIds = [];
 
-            return $this->successResponse($uploadedDokumen, 'Multiple dokumen berhasil diupload', 201);
-            
-        } catch (ValidationException $e) {
-            DB::rollBack();
-            return $this->errorResponse('Validasi gagal', 422, $e->errors());
+            Log::info("🟡 Processing sewa ID: {$idSewa}, documents: " . count($request->dokumen));
+
+            foreach ($request->dokumen as $index => $doc) {
+                try {
+                    Log::info("📄 Processing doc {$index}: {$doc['nama_dokumen']}");
+                    
+                    // Handle base64
+                    $base64Data = $doc['file_base64'];
+                    if (strpos($base64Data, 'base64,') !== false) {
+                        $base64Data = substr($base64Data, strpos($base64Data, 'base64,') + 7);
+                    }
+                    
+                    $fileData = base64_decode($base64Data, true);
+                    if ($fileData === false) {
+                        Log::error("❌ Failed to decode base64 for: {$doc['nama_dokumen']}");
+                        continue;
+                    }
+
+                    // Generate file path
+                    $extension = pathinfo($doc['file_name'], PATHINFO_EXTENSION) ?: 'txt';
+                    $fileName = 'doc_' . $idSewa . '_' . Str::random(10) . '.' . $extension;
+                    $filePath = 'dokumen-pinjaman/' . $fileName;
+
+                    // Save file
+                    $storagePath = storage_path('app/public/' . $filePath);
+                    $directory = dirname($storagePath);
+                    if (!is_dir($directory)) mkdir($directory, 0755, true);
+                    
+                    if (file_put_contents($storagePath, $fileData) === false) {
+                        Log::error("❌ Failed to save file: {$filePath}");
+                        continue;
+                    }
+
+                    Log::info("✅ File saved: {$filePath}");
+
+                    // ✅✅✅ INSERT SESUAI STRUKTUR DATABASE YANG ADA ✅✅✅
+                    $dokumenId = DB::table('dokumen_pinjaman')->insertGetId([
+                        'id_sewa' => $idSewa,
+                        'nama_dokumen' => $doc['nama_dokumen'],
+                        'file_path' => $filePath, // ✅ PAKAI file_path BUKAN path_file
+                        'tipe_dokumen' => $this->getValidTipeDokumen($doc['tipe_dokumen']), // ✅ SESUAI ENUM
+                        'ukuran_file' => strlen($fileData),
+                        'uploaded_by' => null, // atau user ID jika ada
+                        'created_at' => now()
+                        // ❌ TIDAK ADA: nama_file, path_file, tanggal_upload, status_dokumen, updated_at
+                    ]);
+
+                    $uploadedIds[] = $dokumenId;
+                    Log::info("✅ Database record created, ID: {$dokumenId}");
+
+                } catch (\Exception $e) {
+                    Log::error("❌ Error doc {$index}: " . $e->getMessage());
+                }
+            }
+
+            $successCount = count($uploadedIds);
+            Log::info("🎉 Upload completed. Success: {$successCount}");
+
+            return response()->json([
+                'success' => true,
+                'message' => "Upload selesai. Berhasil: {$successCount} dokumen",
+                'data' => [
+                    'id_sewa' => $idSewa,
+                    'total_uploaded' => $successCount,
+                    'dokumen_ids' => $uploadedIds
+                ]
+            ]);
+
         } catch (\Exception $e) {
-            DB::rollBack();
-            return $this->errorResponse('Gagal upload multiple dokumen', 500, $e->getMessage());
+            Log::error('❌ Controller Error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Server Error: ' . $e->getMessage()
+            ], 500);
         }
     }
 
-    // GET: Preview dokumen (return file URL)
-    public function preview($id): JsonResponse
-    {
-        try {
-            $dokumen = DokumenPinjaman::find($id);
-            
-            if (!$dokumen) {
-                return $this->errorResponse('Dokumen tidak ditemukan', 404);
-            }
-
-            if (!Storage::disk('public')->exists($dokumen->file_path)) {
-                return $this->errorResponse('File dokumen tidak ditemukan', 404);
-            }
-
-            $fileUrl = Storage::disk('public')->url($dokumen->file_path);
-
-            return $this->successResponse([
-                'file_url' => $fileUrl,
-                'dokumen' => $dokumen
-            ], 'URL dokumen berhasil diambil');
-            
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil preview dokumen', 500, $e->getMessage());
-        }
-    }
-
-    // Helper function untuk get MIME type
-    private function getMimeType($filePath)
-    {
-        $extension = pathinfo($filePath, PATHINFO_EXTENSION);
+    /**
+ * Download dokumen
+ */
+public function download($id_dokumen)
+{
+    try {
+        Log::info("📥 Download request for dokumen ID: {$id_dokumen}");
         
-        $mimeTypes = [
-            'pdf' => 'application/pdf',
-            'jpg' => 'image/jpeg',
-            'jpeg' => 'image/jpeg',
-            'png' => 'image/png'
-        ];
+        // Cari dokumen
+        $dokumen = DB::table('dokumen_pinjaman')->where('id_dokumen', $id_dokumen)->first();
+        
+        if (!$dokumen) {
+            Log::error("❌ Dokumen tidak ditemukan: {$id_dokumen}");
+            return response()->json([
+                'success' => false,
+                'message' => 'Dokumen tidak ditemukan'
+            ], 404);
+        }
 
-        return $mimeTypes[$extension] ?? 'application/octet-stream';
+        // Pastikan file exists
+        $filePath = storage_path('app/public/' . $dokumen->file_path);
+        
+        if (!file_exists($filePath)) {
+            Log::error("❌ File tidak ditemukan: {$filePath}");
+            return response()->json([
+                'success' => false,
+                'message' => 'File tidak ditemukan di server'
+            ], 404);
+        }
+
+        Log::info("✅ File found, downloading: {$dokumen->nama_dokumen}");
+        
+        // Download file
+        return response()->download($filePath, $dokumen->nama_dokumen);
+        
+    } catch (\Exception $e) {
+        Log::error('❌ Download error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal download dokumen: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Get semua dokumen untuk penyewaan tertentu
+ */
+public function getByPenyewaan($id_sewa)
+{
+    try {
+        Log::info("📋 Get dokumen for sewa ID: {$id_sewa}");
+        
+        $dokumen = DB::table('dokumen_pinjaman')
+            ->where('id_sewa', $id_sewa)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $dokumen,
+            'total' => count($dokumen)
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('❌ Get dokumen error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal mengambil dokumen: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * View dokumen di browser
+ */
+public function view($id_dokumen)
+{
+    try {
+        Log::info("👀 View request for dokumen ID: {$id_dokumen}");
+        
+        // Cari dokumen
+        $dokumen = DB::table('dokumen_pinjaman')->where('id_dokumen', $id_dokumen)->first();
+        
+        if (!$dokumen) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dokumen tidak ditemukan'
+            ], 404);
+        }
+
+        // Pastikan file exists
+        $filePath = storage_path('app/public/' . $dokumen->file_path);
+        
+        if (!file_exists($filePath)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'File tidak ditemukan di server'
+            ], 404);
+        }
+
+        // Get file content and mime type
+        $fileContent = file_get_contents($filePath);
+        $mimeType = mime_content_type($filePath);
+
+        // Return response untuk view di browser
+        return response($fileContent, 200)
+            ->header('Content-Type', $mimeType)
+            ->header('Content-Disposition', 'inline; filename="' . $dokumen->nama_dokumen . '"');
+        
+    } catch (\Exception $e) {
+        Log::error('❌ View error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal menampilkan dokumen: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+    /**
+     * Helper untuk pastikan tipe_dokumen sesuai enum
+     */
+    private function getValidTipeDokumen($inputTipe)
+    {
+        $validTypes = ['Surat_Pinjaman', 'KTP', 'SUJP', 'NPWP']; // Sesuaikan dengan enum di database
+        
+        // Mapping dari input ke enum value
+        $mapping = [
+            'KTP' => 'KTP',
+            'NPWP' => 'NPWP',
+            'SUJP' => 'SUJP', 
+            'Surat Pinjaman' => 'Surat_Pinjaman',
+            'Lainnya' => 'Surat_Pinjaman'
+        ];
+        
+        $mapped = $mapping[$inputTipe] ?? 'Surat_Pinjaman';
+        
+        // Pastikan mapped value ada di valid types
+        return in_array($mapped, $validTypes) ? $mapped : 'Surat_Pinjaman';
     }
 }

@@ -38,7 +38,6 @@ Route::get('/health', function () {
 Route::apiResources([
     'alat-berat' => AlatBeratController::class,
     'pelanggan' => PelangganController::class,
-    'penyewaan' => PenyewaanController::class,
     'pembayaran' => PembayaranController::class,
     'admin' => AdminController::class,
     'petugas' => PetugasController::class,
@@ -61,18 +60,14 @@ Route::get('notifikasi/admin/{id}', [NotifikasiController::class, 'getByAdmin'])
 Route::get('favorit/pelanggan/{id}', [FavoritPelangganController::class, 'getByPelanggan']);
 Route::post('penyewaan/{id}/rating', [PenyewaanController::class, 'addRating']);
 
+Route::get('/pelanggan/by-user/{id_user}', [PelangganController::class, 'getPelangganByUserId']);
+Route::post('/pelanggan/by-user', [PelangganController::class, 'getPelangganByUser']);
+
 
 // ==================== ROUTES PERSETUJUAN PINJAMAN ====================
 Route::get('/penyewaan/persetujuan/pending', [PenyewaanController::class, 'getPersetujuanPinjaman']);
 Route::get('/penyewaan/persetujuan/history', [PenyewaanController::class, 'getHistoryPersetujuan']);
 Route::post('/penyewaan/{id}/persetujuan', [PenyewaanController::class, 'approvePinjaman']);
-
-// Custom routes dokumen
-Route::get('/dokumen-pinjaman/download/{id}', [DokumenPinjamanController::class, 'download']);
-Route::get('/dokumen-pinjaman/preview/{id}', [DokumenPinjamanController::class, 'preview']);
-Route::get('/dokumen-pinjaman/sewa/{id}', [DokumenPinjamanController::class, 'getBySewa']);
-Route::get('/dokumen-pinjaman/tipe/{tipe}', [DokumenPinjamanController::class, 'getByTipe']);
-Route::post('/dokumen-pinjaman/upload-multiple', [DokumenPinjamanController::class, 'uploadMultiple']);
 
 //auth
 Route::post('/admin/login', [AdminController::class, 'login']);
@@ -107,4 +102,43 @@ Route::prefix('admin/dashboard')->group(function () {
     Route::get('quick-stats', [AdminDashboardController::class, 'getQuickStats']);
     Route::get('pending-approvals', [AdminDashboardController::class, 'getPendingApprovals']);
     Route::get('all', [AdminDashboardController::class, 'getAllDashboardData']);
+});
+
+// ✅ ROUTES PENYEWAAN YANG BENAR
+Route::prefix('penyewaan')->group(function () {
+    // Basic CRUD (sudah tercover oleh apiResources, tapi kita custom)
+    Route::get('/', [PenyewaanController::class, 'index']);
+    Route::post('/', [PenyewaanController::class, 'store']);
+    Route::get('/{id}', [PenyewaanController::class, 'show']);
+    Route::put('/{id}', [PenyewaanController::class, 'update']);
+    Route::delete('/{id}', [PenyewaanController::class, 'destroy']);
+    
+    // Custom routes
+    Route::get('/pelanggan/{id}', [PenyewaanController::class, 'getByPelanggan']);
+    Route::get('/persetujuan-pinjaman', [PenyewaanController::class, 'getPersetujuanPinjaman']);
+    Route::post('/{id}/approve', [PenyewaanController::class, 'approvePinjaman']); // ✅ INI YANG DIPAKAI
+    Route::post('/{id}/rating', [PenyewaanController::class, 'addRating']);
+
+    Route::post('/{id}/upload-dokumen', [PenyewaanController::class, 'uploadDokumen']);
+    Route::get('/{id}/dokumen', [PenyewaanController::class, 'getDokumenPenyewaan']);
+    Route::get('/dokumen/{idDokumen}/view', [PenyewaanController::class, 'viewDokumen']);
+});
+
+
+Route::prefix('dokumen-pinjaman')->group(function () {
+    Route::get('/', [DokumenPinjamanController::class, 'index']);
+    Route::post('/', [DokumenPinjamanController::class, 'store']);
+    Route::get('/{id}', [DokumenPinjamanController::class, 'show']);
+    Route::put('/{id}', [DokumenPinjamanController::class, 'update']);
+    Route::delete('/{id}', [DokumenPinjamanController::class, 'destroy']);
+    
+    // Custom routes
+    Route::get('/download/{id}', [DokumenPinjamanController::class, 'download']);
+    Route::get('/preview/{id}', [DokumenPinjamanController::class, 'preview']);
+    Route::get('/sewa/{id}', [DokumenPinjamanController::class, 'getBySewa']);
+    Route::get('/tipe/{tipe}', [DokumenPinjamanController::class, 'getByTipe']);
+    Route::post('/upload-multiple', [DokumenPinjamanController::class, 'uploadMultiple']);
+    
+    // ✅ TAMBAHKAN INI - ROUTE YANG DIPAKAI MOBILE APP
+    Route::post('/upload-for-penyewaan', [DokumenPinjamanController::class, 'uploadForPenyewaan']);
 });

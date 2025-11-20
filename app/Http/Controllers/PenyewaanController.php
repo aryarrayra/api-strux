@@ -6,6 +6,9 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator; // ✅ TAMBAHKAN INI
+use Illuminate\Support\Facades\Log; // ✅ TAMBAHKAN INI
 
 class PenyewaanController extends BaseController
 {
@@ -18,19 +21,118 @@ class PenyewaanController extends BaseController
         'total_harga' => 'required|numeric|min:0',
         'status_sewa' => 'nullable|string|max:20',
         'status_persetujuan' => 'nullable|string|max:20',
-        'alasan_penolakan' => 'nullable|string'
+        'alasan_penolakan' => 'nullable|string',
+        'nama_proyek' => 'nullable|string|max:255',
+        'lokasi_proyek' => 'nullable|string|max:255',
+        'deskripsi_proyek' => 'nullable|string',
+        'latitude' => 'nullable|numeric|between:-90,90',
+        'longitude' => 'nullable|numeric|between:-180,180',
+        'dokumen_data' => 'nullable|string'
     ];
 
     // ✅ TAMBAHKAN METHOD INDEX YANG HILANG
     public function index(): JsonResponse
     {
         try {
-            $data = Penyewaan::with(['pelanggan', 'alat', 'pembayaran', 'dokumen'])
+            $data = Penyewaan::with([
+                    'pelanggan', 
+                    'alat', 
+                    'pembayaran', 
+                    'dokumen' // Relasi ke tabel dokumen_pinjaman
+                ])
+                ->select('*')
                 ->orderBy('id_sewa', 'DESC')
                 ->get();
+                
             return $this->successResponse($data, 'Data penyewaan berhasil diambil');
         } catch (\Exception $e) {
             return $this->errorResponse('Gagal mengambil data penyewaan', 500, $e->getMessage());
+        }
+    }
+
+    public function uploadDokumen(Request $request, $idSewa): JsonResponse
+    {
+        try {
+            $penyewaan = Penyewaan::find($idSewa);
+            
+            if (!$penyewaan) {
+                return $this->errorResponse('Data penyewaan tidak ditemukan', 404);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'dokumen' => 'required|array|min:1',
+                'dokumen.*.nama_dokumen' => 'required|string|max:255',
+                'dokumen.*.tipe_dokumen' => 'required|string|max:100',
+                'dokumen.*.file_base64' => 'required|string',
+                'dokumen.*.file_name' => 'required|string|max:255'
+            ]);
+
+            if ($validator->fails()) {
+                return $this->errorResponse('Validasi gagal', 422, $validator->errors());
+            }
+
+            $uploadedFiles = [];
+
+            DB::beginTransaction();
+
+            foreach ($request->dokumen as $doc) {
+                // Handle base64 file
+                $base64Data = $doc['file_base64'];
+                if (strpos($base64Data, 'base64,') !== false) {
+                    $base64Data = substr($base64Data, strpos($base64Data, 'base64,') + 7);
+                }
+                
+                $fileData = base64_decode($base64Data, true);
+                if ($fileData === false) {
+                    continue;
+                }
+
+                // Save file to storage
+                $extension = pathinfo($doc['file_name'], PATHINFO_EXTENSION) ?: 'pdf';
+                $fileName = 'doc_' . $idSewa . '_' . uniqid() . '.' . $extension;
+                $filePath = 'dokumen-pinjaman/' . $fileName;
+
+                Storage::disk('public')->put($filePath, $fileData);
+
+                // Simpan ke tabel dokumen_pinjaman
+                $dokumenId = DB::table('dokumen_pinjaman')->insertGetId([
+                    'id_sewa' => $idSewa,
+                    'nama_dokumen' => $doc['nama_dokumen'],
+                    'file_path' => $filePath,
+                    'tipe_dokumen' => $doc['tipe_dokumen'],
+                    'ukuran_file' => strlen($fileData),
+                    'uploaded_by' => auth()->id(),
+                    'created_at' => now()
+                ]);
+
+                $uploadedFiles[] = [
+                    'id' => $dokumenId,
+                    'nama' => $doc['file_name'],
+                    'size' => strlen($fileData),
+                    'uploaded_at' => now()->toISOString()
+                ];
+            }
+
+            // Update dokumen_data di penyewaan (untuk kompatibilitas)
+            if (!empty($uploadedFiles)) {
+                $existingDokumen = $penyewaan->dokumen_data ? json_decode($penyewaan->dokumen_data, true) : [];
+                $allDokumen = array_merge($existingDokumen, $uploadedFiles);
+                
+                $penyewaan->update([
+                    'dokumen_data' => json_encode($allDokumen)
+                ]);
+            }
+
+            DB::commit();
+
+            return $this->successResponse([
+                'id_sewa' => $idSewa,
+                'dokumen_uploaded' => $uploadedFiles
+            ], 'Dokumen berhasil diupload');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return $this->errorResponse('Gagal upload dokumen', 500, $e->getMessage());
         }
     }
 
@@ -54,11 +156,59 @@ class PenyewaanController extends BaseController
         }
     }
 
+    public function getDokumenPenyewaan($idSewa): JsonResponse
+    {
+        try {
+            $dokumen = DB::table('dokumen_pinjaman')
+                        ->where('id_sewa', $idSewa)
+                        ->select('id', 'nama_dokumen', 'file_path', 'tipe_dokumen', 'ukuran_file', 'created_at')
+                        ->get();
+
+            return $this->successResponse($dokumen, 'Dokumen penyewaan berhasil diambil');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Gagal mengambil dokumen', 500, $e->getMessage());
+        }
+    }
+
+    public function viewDokumen($idDokumen): JsonResponse
+    {
+        try {
+            $dokumen = DB::table('dokumen_pinjaman')->where('id', $idDokumen)->first();
+            
+            if (!$dokumen) {
+                return $this->errorResponse('Dokumen tidak ditemukan', 404);
+            }
+
+            // Check if file exists
+            if (!Storage::disk('public')->exists($dokumen->file_path)) {
+                return $this->errorResponse('File tidak ditemukan', 404);
+            }
+
+            // Get file content untuk ditampilkan ke admin
+            $fileContent = Storage::disk('public')->get($dokumen->file_path);
+            $base64Content = base64_encode($fileContent);
+            $mimeType = Storage::disk('public')->mimeType($dokumen->file_path);
+
+            return $this->successResponse([
+                'id' => $dokumen->id,
+                'nama_dokumen' => $dokumen->nama_dokumen,
+                'file_name' => basename($dokumen->file_path),
+                'mime_type' => $mimeType,
+                'file_content' => $base64Content, // ✅ INI YANG BISA DILIHAT ADMIN
+                'size' => $dokumen->ukuran_file
+            ], 'Dokumen berhasil diambil');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Gagal mengambil dokumen', 500, $e->getMessage());
+        }
+    }
+
     // ✅ Method untuk approve/reject
     public function approvePinjaman(Request $request, $id): JsonResponse
     {
         try {
-            $penyewaan = Penyewaan::find($id);
+            $penyewaan = Penyewaan::with('dokumen')->find($id);
             
             if (!$penyewaan) {
                 return $this->errorResponse('Data penyewaan tidak ditemukan', 404);
@@ -66,7 +216,8 @@ class PenyewaanController extends BaseController
 
             $validated = $request->validate([
                 'status_persetujuan' => 'required|in:Disetujui,Ditolak',
-                'alasan_penolakan' => 'required_if:status_persetujuan,Ditolak|string|max:500'
+                'alasan_penolakan' => 'required_if:status_persetujuan,Ditolak|string|max:500',
+                'catatan_dokumen' => 'nullable|string' // Catatan khusus untuk dokumen
             ]);
 
             DB::beginTransaction();
@@ -113,15 +264,42 @@ class PenyewaanController extends BaseController
     public function store(Request $request): JsonResponse
     {
         try {
+            // ✅ DEBUG: LOG DATA YANG DITERIMA
+            Log::info('📦 [PenyewaanController] Data yang diterima:', $request->all());
+            Log::info('🔍 [PenyewaanController] dokumen_data:', [
+                'dokumen_data_received' => $request->dokumen_data,
+                'dokumen_data_type' => gettype($request->dokumen_data)
+            ]);
+
             $validated = $this->validateRequest($request);
             
+            // ✅ DEBUG: LOG DATA SETELAH VALIDASI
+            Log::info('✅ [PenyewaanController] Data setelah validasi:', $validated);
+
             // Set default status
             $validated['status_persetujuan'] = 'Menunggu';
             $validated['status_sewa'] = 'Menunggu Persetujuan';
             
+            // ✅ PASTIKAN SEMUA FIELD ADA
+            $validated['nama_proyek'] = $validated['nama_proyek'] ?? null;
+            $validated['lokasi_proyek'] = $validated['lokasi_proyek'] ?? null;
+            $validated['deskripsi_proyek'] = $validated['deskripsi_proyek'] ?? null;
+            $validated['latitude'] = $validated['latitude'] ?? null;
+            $validated['longitude'] = $validated['longitude'] ?? null;
+            $validated['dokumen_data'] = $validated['dokumen_data'] ?? null;
+
+            // ✅ DEBUG: LOG DATA SEBELUM CREATE
+            Log::info('🎯 [PenyewaanController] Data sebelum create:', $validated);
+            
             DB::beginTransaction();
             
             $penyewaan = Penyewaan::create($validated);
+            
+            // ✅ DEBUG: LOG DATA SETELAH CREATE
+            Log::info('🎉 [PenyewaanController] Data setelah create:', [
+                'id_sewa' => $penyewaan->id_sewa,
+                'dokumen_data_saved' => $penyewaan->dokumen_data
+            ]);
             
             DB::commit();
 
@@ -129,9 +307,15 @@ class PenyewaanController extends BaseController
             
         } catch (ValidationException $e) {
             DB::rollBack();
+            Log::error('❌ [PenyewaanController] Validasi gagal:', $e->errors());
             return $this->errorResponse('Validasi gagal', 422, $e->errors());
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('❌ [PenyewaanController] Exception:', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
             return $this->errorResponse('Gagal mengajukan penyewaan', 500, $e->getMessage());
         }
     }
@@ -140,7 +324,13 @@ class PenyewaanController extends BaseController
     public function show($id): JsonResponse
     {
         try {
-            $penyewaan = Penyewaan::with(['pelanggan', 'alat', 'pembayaran', 'jadwal'])->find($id);
+            $penyewaan = Penyewaan::with([
+                    'pelanggan', 
+                    'alat', 
+                    'pembayaran', 
+                    'jadwal',
+                    'dokumen' // Include dokumen
+                ])->find($id);
             
             if (!$penyewaan) {
                 return $this->errorResponse('Data penyewaan tidak ditemukan', 404);
@@ -194,20 +384,21 @@ class PenyewaanController extends BaseController
     }
 
     // ✅ Method getByPelanggan
-    public function getByPelanggan($id)
-    {
-        try {
-            $penyewaan = Penyewaan::with(['alat', 'pembayaran'])
-                ->where('id_pelanggan', $id)
-                ->orderBy('id_sewa', 'DESC')
-                ->get();
-                
-            return $this->successResponse($penyewaan, 'Data penyewaan pelanggan berhasil diambil');
+public function getByPelanggan($id)
+{
+    try {
+        $penyewaan = Penyewaan::with(['alat', 'pembayaran'])
+            ->select('*') // ✅ PASTIKAN SEMUA FIELD TERMASUK YANG BARU
+            ->where('id_pelanggan', $id)
+            ->orderBy('id_sewa', 'DESC')
+            ->get();
             
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil data penyewaan', 500, $e->getMessage());
-        }
+        return $this->successResponse($penyewaan, 'Data penyewaan pelanggan berhasil diambil');
+        
+    } catch (\Exception $e) {
+        return $this->errorResponse('Gagal mengambil data penyewaan', 500, $e->getMessage());
     }
+}
 
     // ✅ Method addRating
     public function addRating(Request $request, $id)
