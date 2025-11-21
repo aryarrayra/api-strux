@@ -19,6 +19,7 @@ class Petugas extends Model
         'tanggal_lahir', // TAMBAHKAN INI
         'role',
         'email',
+        'password',
         'status'
     ];
 
@@ -31,6 +32,7 @@ class Petugas extends Model
         'tanggal_lahir' => 'date',
         'role' => 'string',
         'email' => 'string',
+        'password' => 'string',
         'status' => 'string'
     ];
 
