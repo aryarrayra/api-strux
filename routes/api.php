@@ -17,6 +17,7 @@ use App\Http\Controllers\LogAktivitasPelangganController;
 use App\Http\Controllers\KonfigurasiController;
 use App\Http\Controllers\FavoritPelangganController;
 use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\DokumenPinjamanController;
 
 /*
 |--------------------------------------------------------------------------
@@ -142,3 +143,24 @@ Route::prefix('dokumen-pinjaman')->group(function () {
     // ✅ TAMBAHKAN INI - ROUTE YANG DIPAKAI MOBILE APP
     Route::post('/upload-for-penyewaan', [DokumenPinjamanController::class, 'uploadForPenyewaan']);
 });
+
+Route::prefix('pembayaran')->group(function () {
+
+    Route::get('/export-laporan', [PembayaranController::class, 'exportLaporan']);
+    Route::get('/test-laporan', [PembayaranController::class, 'testLaporan']);
+
+    Route::get('/', [PembayaranController::class, 'index']);
+    Route::post('/', [PembayaranController::class, 'store']);
+    Route::get('/{id}', [PembayaranController::class, 'show']);
+    Route::put('/{id}', [PembayaranController::class, 'update']);
+    Route::delete('/{id}', [PembayaranController::class, 'destroy']);
+    
+    // Tambahkan routes baru untuk laporan keuangan
+
+});
+
+Route::get('/pembayaran/laporan-keuangan', [PembayaranController::class, 'getLaporanKeuangan']); // Original
+Route::get('/pembayaran/laporan-simple', [PembayaranController::class, 'getLaporanKeuanganSimple']); // Simple version
+Route::get('/pembayaran/laporan-safe', [PembayaranController::class, 'getLaporanKeuanganSafe']); // Safe version
+Route::get('/pembayaran/laporan-raw', [PembayaranController::class, 'getLaporanKeuanganRaw']); // Raw SQL version
+Route::get('/pembayaran/test-relasi', [PembayaranController::class, 'testRelasi']); // Test relationships
