@@ -111,7 +111,7 @@ class PembayaranController extends BaseController
                     'pembayaran.*',
                     'penyewaan.id_sewa',
                     'penyewaan.id_alat',
-                    'alat_berat.kategori',
+                    'alat_berat.jenis',
                     'alat_berat.nama_alat'
                 )
                 ->get();
@@ -176,11 +176,11 @@ class PembayaranController extends BaseController
                 ->where('pembayaran.status_pembayaran', 'Lunas')
                 ->whereBetween('pembayaran.tanggal_bayar', [$dateRange['start'], $dateRange['end']])
                 ->select(
-                    'alat_berat.kategori',
+                    'alat_berat.jenis',
                     DB::raw('SUM(pembayaran.jumlah_bayar) as total_pendapatan'),
                     DB::raw('COUNT(penyewaan.id_sewa) as total_sewa')
                 )
-                ->groupBy('alat_berat.kategori')
+                ->groupBy('alat_berat.jenis')
                 ->get();
 
             Log::info("📈 [LAPORAN ORIGINAL] Kategori data found: " . $pendapatanPerKategori->count());
@@ -190,11 +190,11 @@ class PembayaranController extends BaseController
             foreach ($pendapatanPerKategori as $item) {
                 $percentage = $totalPendapatan > 0 ? ($item->total_pendapatan / $totalPendapatan) * 100 : 0;
                 $categories[] = [
-                    'name' => $item->kategori,
+                    'name' => $item->jenis,
                     'percentage' => round($percentage, 1),
                     'total_pendapatan' => $item->total_pendapatan,
                     'total_sewa' => $item->total_sewa,
-                    'color' => $this->getCategoryColor($item->kategori)
+                    'color' => $this->getCategoryColor($item->jenis)
                 ];
             }
 
@@ -354,11 +354,11 @@ class PembayaranController extends BaseController
                 ->where('pembayaran.status_pembayaran', 'Lunas')
                 ->whereBetween('pembayaran.tanggal_bayar', [$dateRange['start'], $dateRange['end']])
                 ->select(
-                    DB::raw('COALESCE(alat_berat.kategori, "Tidak Diketahui") as kategori'),
+                    DB::raw('COALESCE(alat_berat.jenis, "Tidak Diketahui") as jenis'),
                     DB::raw('SUM(pembayaran.jumlah_bayar) as total_pendapatan'),
                     DB::raw('COUNT(pembayaran.id_pembayaran) as total_transaksi')
                 )
-                ->groupBy('kategori')
+                ->groupBy('jenis')
                 ->get();
 
             Log::info("💰 [LAPORAN SAFE] Pendapatan data:", $pendapatanData->toArray());
@@ -415,7 +415,7 @@ class PembayaranController extends BaseController
             // Raw SQL query
             $sql = "
                 SELECT 
-                    COALESCE(ab.kategori, 'Tidak Diketahui') as kategori,
+                    COALESCE(ab.jenis, 'Tidak Diketahui') as jenis,
                     SUM(p.jumlah_bayar) as total_pendapatan,
                     COUNT(p.id_pembayaran) as total_transaksi
                 FROM pembayaran p
@@ -423,7 +423,7 @@ class PembayaranController extends BaseController
                 LEFT JOIN alat_berat ab ON py.id_alat = ab.id_alat
                 WHERE p.status_pembayaran = 'Lunas'
                 AND p.tanggal_bayar BETWEEN ? AND ?
-                GROUP BY ab.kategori
+                GROUP BY ab.jenis
                 ORDER BY total_pendapatan DESC
             ";
 
@@ -616,63 +616,106 @@ class PembayaranController extends BaseController
         return $colors[$metode] ?? '#CCCCCC';
     }
 
-    private function getLaporanDataForPDF($period, $dateRange)
+    public function downloadPDF(Request $request)
     {
-        // Gunakan method simple untuk PDF
-        $totalPendapatan = Pembayaran::where('status_pembayaran', 'Lunas')
-            ->whereBetween('tanggal_bayar', [$dateRange['start'], $dateRange['end']])
-            ->sum('jumlah_bayar');
+        try {
+            $period = $request->get('period', '6 bulan terakhir');
+            
+            Log::info("📥 [DOWNLOAD PDF] Starting PDF download for period: {$period}");
+            
+            // Tentukan rentang tanggal berdasarkan periode
+            $dateRange = $this->getDateRange($period);
+            
+            // Ambil data laporan
+            $totalPendapatan = Pembayaran::where('status_pembayaran', 'Lunas')
+                ->whereBetween('tanggal_bayar', [$dateRange['start'], $dateRange['end']])
+                ->sum('jumlah_bayar');
 
-        $pendapatanPerKategori = DB::table('pembayaran')
-            ->leftJoin('penyewaan', 'pembayaran.id_sewa', '=', 'penyewaan.id_sewa')
-            ->leftJoin('alat_berat', 'penyewaan.id_alat', '=', 'alat_berat.id_alat')
-            ->where('pembayaran.status_pembayaran', 'Lunas')
-            ->whereBetween('pembayaran.tanggal_bayar', [$dateRange['start'], $dateRange['end']])
-            ->select(
-                DB::raw('COALESCE(alat_berat.kategori, "Tidak Diketahui") as kategori'),
-                DB::raw('SUM(pembayaran.jumlah_bayar) as total_pendapatan'),
-                DB::raw('COUNT(pembayaran.id_pembayaran) as total_sewa')
-            )
-            ->groupBy('kategori')
-            ->get();
+            // Data per kategori alat berat
+            $pendapatanPerKategori = DB::table('pembayaran')
+                ->leftJoin('penyewaan', 'pembayaran.id_sewa', '=', 'penyewaan.id_sewa')
+                ->leftJoin('alat_berat', 'penyewaan.id_alat', '=', 'alat_berat.id_alat')
+                ->where('pembayaran.status_pembayaran', 'Lunas')
+                ->whereBetween('pembayaran.tanggal_bayar', [$dateRange['start'], $dateRange['end']])
+                ->select(
+                    DB::raw('COALESCE(alat_berat.jenis, "Tidak Diketahui") as jenis'),
+                    DB::raw('SUM(pembayaran.jumlah_bayar) as total_pendapatan'),
+                    DB::raw('COUNT(pembayaran.id_pembayaran) as total_sewa')
+                )
+                ->groupBy('jenis')
+                ->get();
 
-        $categories = [];
-        foreach ($pendapatanPerKategori as $item) {
-            $percentage = $totalPendapatan > 0 ? ($item->total_pendapatan / $totalPendapatan) * 100 : 0;
-            $categories[] = [
-                'name' => $item->kategori,
-                'percentage' => round($percentage, 1),
-                'total_pendapatan' => $item->total_pendapatan,
-                'total_sewa' => $item->total_sewa
+            // Format data untuk PDF
+            $categories = [];
+            foreach ($pendapatanPerKategori as $item) {
+                $percentage = $totalPendapatan > 0 ? ($item->total_pendapatan / $totalPendapatan) * 100 : 0;
+                $categories[] = [
+                    'name' => $item->jenis,
+                    'percentage' => round($percentage, 1),
+                    'total_pendapatan' => $item->total_pendapatan,
+                    'total_sewa' => $item->total_sewa,
+                    'color' => $this->getCategoryColor($item->jenis)
+                ];
+            }
+
+            $laporanData = [
+                'totalPendapatan' => $totalPendapatan,
+                'categories' => $categories,
+                'period' => $period,
+                'dateRange' => [
+                    'start' => Carbon::parse($dateRange['start'])->format('d F Y'),
+                    'end' => Carbon::parse($dateRange['end'])->format('d F Y')
+                ],
+                'generatedAt' => now()->format('d F Y H:i:s')
             ];
-        }
 
-        return [
-            'totalPendapatan' => $totalPendapatan,
-            'categories' => $categories,
-            'period' => $period,
-            'dateRange' => [
-                'start' => Carbon::parse($dateRange['start'])->format('d F Y'),
-                'end' => Carbon::parse($dateRange['end'])->format('d F Y')
-            ],
-            'generatedAt' => now()->format('d F Y H:i:s')
-        ];
+            Log::info("📊 [DOWNLOAD PDF] Data prepared for PDF");
+
+            // Generate PDF
+            $pdf = PDF::loadHTML($this->generatePDFHTML($laporanData))
+                     ->setPaper('a4', 'portrait')
+                     ->setOptions([
+                         'defaultFont' => 'sans-serif',
+                         'isHtml5ParserEnabled' => true,
+                         'isRemoteEnabled' => true
+                     ]);
+
+            $filename = 'laporan-keuangan-' . date('Y-m-d') . '.pdf';
+
+            Log::info("✅ [DOWNLOAD PDF] PDF generated successfully: {$filename}");
+
+            return $pdf->download($filename);
+
+        } catch (\Exception $e) {
+            Log::error('❌ [DOWNLOAD PDF] Error: ' . $e->getMessage());
+            Log::error('❌ [DOWNLOAD PDF] Stack trace: ' . $e->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengunduh PDF: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
+    /**
+     * Method untuk generate HTML PDF yang lebih baik
+     */
     private function generatePDFHTML($laporanData)
     {
         $categoriesHtml = '';
         $totalSewa = 0;
+        $totalAll = 0;
         
         foreach ($laporanData['categories'] as $category) {
             $categoriesHtml .= "
                 <tr>
-                    <td style='border: 1px solid #ddd; padding: 8px;'>{$category['name']}</td>
-                    <td style='border: 1px solid #ddd; padding: 8px; text-align: right;'>Rp " . number_format($category['total_pendapatan'], 0, ',', '.') . "</td>
-                    <td style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{$category['total_sewa']} sewa</td>
-                    <td style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{$category['percentage']}%</td>
+                    <td style='border: 1px solid #ddd; padding: 12px;'>{$category['name']}</td>
+                    <td style='border: 1px solid #ddd; padding: 12px; text-align: right;'>Rp " . number_format($category['total_pendapatan'], 0, ',', '.') . "</td>
+                    <td style='border: 1px solid #ddd; padding: 12px; text-align: center;'>{$category['total_sewa']} sewa</td>
+                    <td style='border: 1px solid #ddd; padding: 12px; text-align: center;'><strong>{$category['percentage']}%</strong></td>
                 </tr>";
             $totalSewa += $category['total_sewa'];
+            $totalAll += $category['total_pendapatan'];
         }
 
         return "
@@ -683,10 +726,10 @@ class PembayaranController extends BaseController
             <title>Laporan Keuangan</title>
             <style>
                 body { 
-                    font-family: Arial, sans-serif; 
-                    margin: 20px; 
+                    font-family: 'DejaVu Sans', Arial, sans-serif; 
+                    margin: 25px; 
                     color: #333;
-                    line-height: 1.6;
+                    line-height: 1.4;
                 }
                 .header { 
                     text-align: center; 
@@ -696,80 +739,126 @@ class PembayaranController extends BaseController
                 }
                 .header h1 { 
                     color: #F59E0B; 
-                    margin: 0; 
-                    font-size: 24px;
+                    margin: 0 0 10px 0; 
+                    font-size: 28px;
+                }
+                .header p {
+                    margin: 0;
+                    color: #666;
+                    font-size: 14px;
                 }
                 .summary { 
                     background: #FEF3C7; 
-                    padding: 20px; 
+                    padding: 25px; 
                     border-radius: 8px; 
-                    margin-bottom: 30px;
-                    border-left: 4px solid #F59E0B;
+                    margin-bottom: 25px;
+                    border-left: 6px solid #F59E0B;
+                    text-align: center;
                 }
                 .summary h3 { 
-                    margin: 0; 
+                    margin: 0 0 15px 0; 
                     color: #78350F;
+                    font-size: 18px;
+                }
+                .total-amount {
+                    font-size: 32px;
+                    font-weight: bold;
+                    color: #78350F;
+                    margin: 0;
+                }
+                .period-info {
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 6px;
+                    margin-bottom: 25px;
+                    font-size: 14px;
+                    border: 1px solid #e9ecef;
                 }
                 table { 
                     width: 100%; 
                     border-collapse: collapse; 
                     margin-bottom: 30px; 
                     font-size: 12px;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
                 }
                 th { 
                     background-color: #F59E0B; 
                     color: white; 
-                    padding: 12px; 
+                    padding: 15px 12px; 
                     text-align: left;
                     border: 1px solid #E5E5E5;
+                    font-weight: 600;
+                    font-size: 13px;
                 }
                 td { 
-                    padding: 10px; 
+                    padding: 12px; 
                     border: 1px solid #E5E5E5;
+                    font-size: 12px;
+                }
+                tr:nth-child(even) {
+                    background-color: #f8f9fa;
                 }
                 .footer { 
                     text-align: center; 
                     color: #666; 
                     font-size: 11px; 
-                    margin-top: 50px; 
-                    border-top: 1px solid #E5E5E5;
+                    margin-top: 40px; 
+                    border-top: 2px solid #E5E5E5;
                     padding-top: 20px;
-                }
-                .period-info {
-                    background: #f8f9fa;
-                    padding: 15px;
-                    border-radius: 5px;
-                    margin-bottom: 20px;
-                    font-size: 14px;
                 }
                 tfoot {
                     font-weight: bold;
-                    background-color: #f8f9fa;
+                    background-color: #FEF3C7;
+                }
+                tfoot td {
+                    border: 1px solid #E5E5E5;
+                    padding: 12px;
+                }
+                .text-right {
+                    text-align: right;
+                }
+                .text-center {
+                    text-align: center;
+                }
+                .logo {
+                    text-align: center;
+                    margin-bottom: 10px;
+                }
+                .logo-text {
+                    font-size: 16px;
+                    font-weight: bold;
+                    color: #F59E0B;
                 }
             </style>
         </head>
         <body>
+            <div class='logo'>
+                <div class='logo-text'>SISTEM MANAJEMEN ALAT BERAT</div>
+            </div>
+
             <div class='header'>
                 <h1>LAPORAN KEUANGAN</h1>
-                <p>Sistem Manajemen Alat Berat - Strux</p>
+                <p>Laporan Pendapatan dan Kinerja Keuangan</p>
             </div>
 
             <div class='period-info'>
                 <strong>Periode Laporan:</strong> {$laporanData['period']}<br>
-                <strong>Rentang Tanggal:</strong> {$laporanData['dateRange']['start']} - {$laporanData['dateRange']['end']}
+                <strong>Rentang Tanggal:</strong> {$laporanData['dateRange']['start']} - {$laporanData['dateRange']['end']}<br>
+                <strong>Tanggal Cetak:</strong> {$laporanData['generatedAt']}
             </div>
 
             <div class='summary'>
-                <h3>Total Pendapatan: Rp " . number_format($laporanData['totalPendapatan'], 0, ',', '.') . "</h3>
+                <h3>TOTAL PENDAPATAN</h3>
+                <p class='total-amount'>Rp " . number_format($laporanData['totalPendapatan'], 0, ',', '.') . "</p>
             </div>
 
             <table>
                 <thead>
                     <tr>
-                        <th>Kategori Alat Berat</th>
-                        <th>Total Pendapatan</th>
-                        <th>Jumlah Sewa</th>
-                        <th>Persentase</th>
+                        <th>KATEGORI ALAT BERAT</th>
+                        <th class='text-right'>TOTAL PENDAPATAN</th>
+                        <th class='text-center'>JUMLAH SEWA</th>
+                        <th class='text-center'>PERSENTASE</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -777,17 +866,17 @@ class PembayaranController extends BaseController
                 </tbody>
                 <tfoot>
                     <tr>
-                        <td>TOTAL</td>
-                        <td style='text-align: right;'>Rp " . number_format($laporanData['totalPendapatan'], 0, ',', '.') . "</td>
-                        <td style='text-align: center;'>{$totalSewa} sewa</td>
-                        <td style='text-align: center;'>100%</td>
+                        <td><strong>TOTAL KESELURUHAN</strong></td>
+                        <td class='text-right'><strong>Rp " . number_format($laporanData['totalPendapatan'], 0, ',', '.') . "</strong></td>
+                        <td class='text-center'><strong>{$totalSewa} SEWA</strong></td>
+                        <td class='text-center'><strong>100%</strong></td>
                     </tr>
                 </tfoot>
             </table>
 
             <div class='footer'>
-                <p>Dibuat secara otomatis pada: {$laporanData['generatedAt']}</p>
-                <p>© " . date('Y') . " Sistem Manajemen Alat Berat - Strux</p>
+                <p>Dokumen ini dibuat secara otomatis dan sah oleh Sistem Manajemen Alat Berat</p>
+                <p>© " . date('Y') . " - All rights reserved</p>
             </div>
         </body>
         </html>";

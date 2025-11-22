@@ -72,12 +72,13 @@ Route::post('/penyewaan/{id}/persetujuan', [PenyewaanController::class, 'approve
 
 //auth
 Route::post('/admin/login', [AdminController::class, 'login']);
+Route::post('/petugas/login', [PetugasController::class, 'login']);
 Route::post('/user/login', [PelangganController::class, 'login']);
 Route::post('/user/register', [PelangganController::class, 'register']);
 Route::post('/user/logout', [PelangganController::class, 'logout']);
 Route::post('/user/profile', [PelangganController::class, 'profile']);
 Route::post('/user/profile/update', [PelangganController::class, 'updateProfile']);
-Route::post('/upload-ktp', [PelangganController::class, 'uploadKtp']);
+Route::post('/upload-ktp', [PelangganController::class, 'uploadKtp']);  
 Route::post('/upload-profile-photo', [PelangganController::class, 'uploadProfilePhoto']);
 
 //alat-berat
@@ -159,8 +160,9 @@ Route::prefix('pembayaran')->group(function () {
 
 });
 
-Route::get('/pembayaran/laporan-keuangan', [PembayaranController::class, 'getLaporanKeuangan']); // Original
+Route::get('/laporan-keuangan', [PembayaranController::class, 'getLaporanKeuangan']); // Original
 Route::get('/pembayaran/laporan-simple', [PembayaranController::class, 'getLaporanKeuanganSimple']); // Simple version
 Route::get('/pembayaran/laporan-safe', [PembayaranController::class, 'getLaporanKeuanganSafe']); // Safe version
 Route::get('/pembayaran/laporan-raw', [PembayaranController::class, 'getLaporanKeuanganRaw']); // Raw SQL version
 Route::get('/pembayaran/test-relasi', [PembayaranController::class, 'testRelasi']); // Test relationships
+Route::get('/pembayaran/download-pdf', [PembayaranController::class, 'downloadPDF']);
