@@ -5,6 +5,7 @@ use App\Models\Petugas;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class PetugasController extends Controller
@@ -78,54 +79,54 @@ class PetugasController extends Controller
     }
 
     public function login(Request $request): JsonResponse
-{
-    try {
-        $validated = $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string',
-            'role' => 'required|string'
-        ]);
+    {
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+                'password' => 'required|string',
+                'role' => 'required|string'
+            ]);
 
-        $petugas = Petugas::where('email', $validated['email'])->first();
+            $petugas = Petugas::where('email', $validated['email'])->first();
 
-        if (!$petugas || !Hash::check($validated['password'], $petugas->password)) {
+            if (!$petugas || !Hash::check($validated['password'], $petugas->password)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email atau password salah'
+                ], 401);
+            }
+
+            if ($petugas->status !== 'Aktif') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akun petugas tidak aktif'
+                ], 401);
+            }
+
+            // Hapus password dari response
+            $userData = $petugas->toArray();
+            unset($userData['password']);
+
+            return response()->json([
+                'success' => true,
+                'data' => $userData,
+                'message' => 'Login petugas berhasil'
+            ]);
+            
+        } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Email atau password salah'
-            ], 401);
-        }
-
-        if ($petugas->status !== 'Aktif') {
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error login petugas: ' . $e->getMessage()); // ← SEKARANG BENAR
             return response()->json([
                 'success' => false,
-                'message' => 'Akun petugas tidak aktif'
-            ], 401);
+                'message' => 'Gagal login: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Hapus password dari response
-        $userData = $petugas->toArray();
-        unset($userData['password']);
-
-        return response()->json([
-            'success' => true,
-            'data' => $userData,
-            'message' => 'Login petugas berhasil'
-        ]);
-        
-    } catch (ValidationException $e) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Validasi gagal',
-            'errors' => $e->errors()
-        ], 422);
-    } catch (\Exception $e) {
-        Log::error('Error login petugas: ' . $e->getMessage());
-        return response()->json([
-            'success' => false,
-            'message' => 'Gagal login: ' . $e->getMessage()
-        ], 500);
     }
-}
 
     public function update(Request $request, $id): JsonResponse
     {
