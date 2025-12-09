@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 use App\Models\PerawatanAlat;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class PerawatanAlatController extends BaseController
@@ -14,7 +15,7 @@ class PerawatanAlatController extends BaseController
         'tanggal_perawatan' => 'required|date',
         'keterangan' => 'nullable|string',
         'biaya_perawatan' => 'required|numeric|min:0',
-        'status' => 'nullable|string|max:20'
+        'status' => 'nullable|string|in:Dijadwalkan,Selesai'
     ];
 
     public function index(): JsonResponse
@@ -29,55 +30,67 @@ class PerawatanAlatController extends BaseController
         }
     }
 
-    public function store(Request $request): JsonResponse
-    {
-        try {
-            $validated = $this->validateRequest($request);
-            
-            $perawatan = PerawatanAlat::create($validated);
-            return $this->successResponse($perawatan, 'Data perawatan alat berhasil ditambahkan', 201);
-            
-        } catch (ValidationException $e) {
-            return $this->errorResponse('Validasi gagal', 422, $e->errors());
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal menambah data perawatan alat', 500, $e->getMessage());
-        }
-    }
-
-    public function show($id): JsonResponse
-    {
-        try {
-            $perawatan = PerawatanAlat::with(['alat'])->find($id);
-            
-            if (!$perawatan) {
-                return $this->errorResponse('Data perawatan alat tidak ditemukan', 404);
-            }
-
-            return $this->successResponse($perawatan, 'Data perawatan alat berhasil diambil');
-            
-        } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengambil data perawatan alat', 500, $e->getMessage());
-        }
-    }
-
     public function update(Request $request, $id): JsonResponse
     {
+        Log::info('🔄 [PERAWATAN_UPDATE] Starting update', [
+            'id' => $id,
+            'request_data' => $request->all(),
+            'method' => $request->method()
+        ]);
+
         try {
             $perawatan = PerawatanAlat::find($id);
             
             if (!$perawatan) {
+                Log::error('❌ [PERAWATAN_UPDATE] Data not found:', ['id' => $id]);
                 return $this->errorResponse('Data perawatan alat tidak ditemukan', 404);
             }
 
-            $validated = $this->validateRequest($request);
-            $perawatan->update($validated);
+            Log::info('📝 [PERAWATAN_UPDATE] Found record:', [
+                'current_data' => $perawatan->toArray()
+            ]);
+
+            // Gunakan sometimes untuk update (tidak semua field required)
+            $validated = $request->validate([
+                'id_alat' => 'sometimes|required|exists:alat_berat,id_alat',
+                'tanggal_perawatan' => 'sometimes|required|date',
+                'keterangan' => 'nullable|string',
+                'biaya_perawatan' => 'sometimes|required|numeric|min:0',
+                'status' => 'sometimes|required|string|in:Dijadwalkan,Selesai'
+            ]);
+
+            Log::info('✅ [PERAWATAN_UPDATE] Validation passed:', $validated);
+
+            // Update data
+            $perawatan->update([
+                'tanggal_perawatan' => $validated['tanggal_perawatan'] ?? $perawatan->tanggal_perawatan,
+                'keterangan' => $validated['keterangan'] ?? $perawatan->keterangan,
+                'biaya_perawatan' => $validated['biaya_perawatan'] ?? $perawatan->biaya_perawatan,
+                'status' => $validated['status'] ?? $perawatan->status,
+                // id_alat biasanya tidak diupdate
+            ]);
+
+            Log::info('💾 [PERAWATAN_UPDATE] Database updated:', [
+                'id' => $perawatan->id_perawatan,
+                'new_data' => $perawatan->toArray()
+            ]);
+
+            // Load alat relation
+            $perawatan->load('alat');
 
             return $this->successResponse($perawatan, 'Data perawatan alat berhasil diupdate');
             
         } catch (ValidationException $e) {
-            return $this->errorResponse('Validasi gagal', 422, $e->errors());
+            Log::error('❌ [PERAWATAN_UPDATE] Validation error:', $e->errors());
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
-            return $this->errorResponse('Gagal mengupdate data perawatan alat', 500, $e->getMessage());
+            Log::error('❌ [PERAWATAN_UPDATE] Error: ' . $e->getMessage());
+            Log::error('❌ [PERAWATAN_UPDATE] Trace: ' . $e->getTraceAsString());
+            return $this->errorResponse('Gagal mengupdate data perawatan alat: ' . $e->getMessage(), 500);
         }
     }
 
